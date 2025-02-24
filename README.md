@@ -1,126 +1,148 @@
-# Sistema de Hooks e Actions em Python e PHP
+Sistema de Hooks e Actions com Plugins
 
-Este projeto demonstra como criar um sistema modular de hooks e actions, semelhante ao funcionamento do WordPress, permitindo a adição de funcionalidades sem modificar o código principal do sistema.
+Este projeto demonstra uma arquitetura modular para aplicações, inspirada no modelo do WordPress, onde é possível interceptar e modificar os parâmetros e retornos de funções do sistema através de hooks.
+Os hooks são persistidos em um arquivo JSON, possuem hierarquia (prioridades) e permitem que plugins adicionem funcionalidades sem modificar o código principal.
+Funcionalidades
 
-## Funcionalidades
-✅ **Hooks persistentes** armazenados em JSON.  
-✅ **Hierarquia e níveis de execução** com prioridade definida para cada hook.  
-✅ **Interceptação de parâmetros antes da execução da função**.  
-✅ **Modificação do retorno após a execução da função**.  
-✅ **Possibilidade de criação de plugins sem alterar o código principal**.  
+    Hooks persistentes: Os hooks são salvos e carregados de um arquivo JSON, permitindo persistência e fácil configuração.
+    Interceptação automática: Usamos uma camada de interceptação para que funções do sistema sejam automaticamente envolvidas por before hooks (executados antes) e after hooks (executados depois), sem alterar o corpo da função.
+    Prioridades: Cada hook pode ser registrado com uma prioridade, definindo a ordem de execução.
+    Plugins: Funções externas podem ser registradas para modificar os parâmetros (antes) e o retorno (depois) de funções críticas do sistema.
 
----
+Como Funciona
+1. Camada de Interceptação
 
-## Estrutura do Projeto
+Para interceptar as chamadas sem alterar o código do sistema, usamos um decorator em Python. Um decorator é uma função que envolve outra função, permitindo executar código adicional antes e/ou depois da função original. Assim, podemos modificar os parâmetros de entrada ou o resultado sem precisar editar a função principal.
+O que é um Decorator em Python?
 
-O projeto consiste em dois arquivos principais, um para Python e outro para PHP, cada um implementando um sistema de hooks modular.
-
-- `hooks.json`: Armazena as configurações de hooks e suas funções associadas.
-- `hook_manager.py`: Implementação do sistema de hooks em Python.
-- `hook_manager.php`: Implementação do sistema de hooks em PHP.
----
-
-## Como Funciona?
-
-### 1. Adicionando Hooks e Actions
-Os hooks podem ser adicionados dinamicamente ao sistema, associando funções a um nome específico e atribuindo uma prioridade de execução. Isso permite que múltiplas funções sejam executadas antes ou depois de uma determinada função principal do sistema.
-
-### 2. Execução dos Hooks
-Quando um hook é acionado, todas as funções associadas a ele são executadas na ordem definida pela prioridade.
-
-### 3. Modificação de Parâmetros e Retornos
-- Hooks "antes" permitem modificar os parâmetros antes da função principal ser executada.
-- Hooks "depois" permitem modificar o retorno da função principal.
-
----
-
-## Exemplo de Uso (Python)
-
-### Criando um Hook Manager
+Imagine que você tem uma função que faz algo importante, mas você quer adicionar um comportamento extra (como logar, validar dados, ou modificar parâmetros) sempre que essa função for chamada.
+Um decorator é uma função que recebe outra função como argumento, estende seu comportamento e retorna uma nova função "decorada".
+Por exemplo:
 ```python
-hooks = HookManager()
+def meu_decorator(func):
+    def wrapper(*args, **kwargs):
+        print("Antes de chamar a função")
+        resultado = func(*args, **kwargs)
+        print("Depois de chamar a função")
+        return resultado
+    return wrapper
+
+@meu_decorator
+def minha_funcao(x):
+    return x * 2
+
+print(minha_funcao(5))
 ```
+Ao usar @meu_decorator, o Python transforma minha_funcao na função wrapper definida dentro do decorator. Dessa forma, sempre que minha_funcao é chamada, o código dentro de wrapper é executado, permitindo adicionar comportamentos sem alterar o código original.
+2. Sistema de Hooks com Decorator
 
-### Criando uma Função do Sistema
+No nosso sistema, o decorator @hookable envolve a função do sistema. Ele executa automaticamente:
+
+    Before hooks: Funções registradas que podem modificar os parâmetros antes da execução da função original.
+    After hooks: Funções registradas que podem modificar o retorno após a execução da função original.
+
+Veja um trecho de código da implementação em Python:
 ```python
+def hookable(hook_name):
+    """
+    Decorator que intercepta a chamada de uma função:
+      - Aplica before hooks para modificar os parâmetros;
+      - Chama a função original;
+      - Aplica after hooks para modificar o retorno.
+    """
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            # Aplica os before hooks
+            for hook_func_name in hook_manager.get_before_hooks(hook_name):
+                if hook_func_name in globals():
+                    hook_func = globals()[hook_func_name]
+                    modified = hook_func(*args, **kwargs)
+                    if isinstance(modified, tuple) and len(modified) == 2:
+                        args, kwargs = modified
+            # Chama a função original
+            result = func(*args, **kwargs)
+            # Aplica os after hooks
+            for hook_func_name in hook_manager.get_after_hooks(hook_name):
+                if hook_func_name in globals():
+                    hook_func = globals()[hook_func_name]
+                    result = hook_func(result)
+            return result
+        return wrapper
+    return decorator
+
+@hookable("sistema_processa_dados")
 def sistema_processa_dados(dado):
-    dado = hooks.apply_filters("antes_do_sistema", dado)
-    resultado = f"Resultado: {dado}"
-    resultado = hooks.apply_filters("depois_do_sistema", resultado)
-    return resultado
+    print(f"[SISTEMA] Processando dado: {dado}")
+    return f"Resultado final: {dado}"
 ```
+3. Registro e Execução dos Plugins
 
-### Criando um Plugin que Modifica os Dados
+Os plugins registram funções que serão chamadas automaticamente como before ou after hooks. Por exemplo:
 ```python
-def intercepta_antes(dado):
-    return dado.upper()
+def antes_plugin(dado, *args, **kwargs):
+    print("[PLUGIN] Executando before hook")
+    return ((dado.upper(),), kwargs)
 
-def intercepta_depois(resultado):
+def depois_plugin(resultado):
+    print("[PLUGIN] Executando after hook")
     return resultado + " [MODIFICADO PELO PLUGIN]"
 
-hooks.add_action("antes_do_sistema", intercepta_antes, priority=5)
-hooks.add_action("depois_do_sistema", intercepta_depois, priority=10)
+hook_manager.add_before_hook("sistema_processa_dados", antes_plugin, priority=5)
+hook_manager.add_after_hook("sistema_processa_dados", depois_plugin, priority=10)
 ```
+Dessa forma, quando sistema_processa_dados("meu dado") é chamado, o decorator intercepta a chamada:
 
-### Executando o Sistema
+    Before hooks: antes_plugin transforma o dado para maiúsculas.
+    A função original processa o dado modificado.
+    After hooks: depois_plugin modifica o resultado retornado pela função do sistema.
+
+4. Implementação em PHP
+
+Uma mecânica similar é implementada em PHP, usando uma função call_hookable que:
+
+    Aplica os before hooks para modificar os parâmetros.
+    Chama a função do sistema.
+    Aplica os after hooks para modificar o retorno.
+
+Confira o trecho de código em PHP:
 ```python
-res = sistema_processa_dados("meu dado")
-print(res)
-```
-Saída esperada:
-```
-[SISTEMA] Processando dado original: meu dado
-[PLUGIN] Interceptando antes do sistema...
-[PLUGIN] Interceptando depois do sistema...
-Resultado: MEU DADO [MODIFICADO PELO PLUGIN]
-```
-
----
-
-## Exemplo de Uso (PHP)
-
-### Criando um Hook Manager
-```php
-HookManager::load_hooks();
-```
-
-### Criando uma Função do Sistema
-```php
-function sistema_processa_dados($dado) {
-    $dado = HookManager::apply_filters("antes_do_sistema", $dado);
-    $resultado = "Resultado: " . $dado;
-    $resultado = HookManager::apply_filters("depois_do_sistema", $resultado);
-    return $resultado;
+function call_hookable($hook_name, $callable, $args = []) {
+    $before_hooks = HookManager::get_before_hooks($hook_name);
+    foreach ($before_hooks as $function) {
+        if (function_exists($function)) {
+            $new_args = call_user_func_array($function, $args);
+            if (is_array($new_args)) {
+                $args = $new_args;
+            }
+        }
+    }
+    $result = call_user_func_array($callable, $args);
+    $after_hooks = HookManager::get_after_hooks($hook_name);
+    foreach ($after_hooks as $function) {
+        if (function_exists($function)) {
+            $result = call_user_func($function, $result);
+        }
+    }
+    return $result;
 }
-```
 
-### Criando um Plugin que Modifica os Dados
-```php
-function intercepta_antes($dado) {
-    return strtoupper($dado);
-}
-function intercepta_depois($resultado) {
-    return $resultado . " [MODIFICADO PELO PLUGIN]";
-}
-HookManager::add_action("antes_do_sistema", "intercepta_antes", 5);
-HookManager::add_action("depois_do_sistema", "intercepta_depois", 10);
+$res = HookManager::call_hookable("sistema_processa_dados", "sistema_processa_dados", ["meu dado"]);
+echo $res;
 ```
+Resumo
 
-### Executando o Sistema
-```php
-$res = sistema_processa_dados("meu dado");
-echo "$res\n";
-```
-Saída esperada:
-```
-[SISTEMA] Processando dado original: meu dado
-[PLUGIN] Interceptando antes do sistema...
-[PLUGIN] Interceptando depois do sistema...
-Resultado: MEU DADO [MODIFICADO PELO PLUGIN]
-```
+    O que é um decorator?
+    Um decorator em Python é uma função que recebe outra função, estende seu comportamento e retorna uma nova função, permitindo a injeção de código antes e depois da execução da função original.
 
----
+    Como funciona o sistema de hooks?
+    As funções do sistema são envolvidas por uma camada de interceptação que aplica os hooks registrados:
+        Before hooks: Modificam os parâmetros antes da função principal.
+        After hooks: Modificam o retorno depois que a função principal é executada.
 
-## Conclusão
-Este sistema permite que aplicações sejam estendidas sem modificar o código-fonte principal, tornando-as altamente flexíveis e modulares. Com esse conceito, é possível criar **frameworks**, **sistemas de plugins**, e **softwares altamente configuráveis**.
+    Vantagens:
+        Permite a criação de um sistema modular e extensível.
+        Plugins podem ser adicionados sem alterar o código principal.
+        A persistência via JSON facilita a configuração e manutenção dos hooks.
 
+Esse sistema demonstra como é possível criar uma arquitetura dinâmica, onde funcionalidades podem ser alteradas ou estendidas sem tocar no núcleo da aplicação, inspirando a criação de plugins e frameworks altamente configuráveis.
