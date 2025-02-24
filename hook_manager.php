@@ -13,69 +13,100 @@ class HookManager {
         file_put_contents(self::$json_file, json_encode(self::$hooks, JSON_PRETTY_PRINT));
     }
 
-    public static function add_action($hook_name, $function, $priority = 10) {
+    public static function add_before_hook($hook_name, $function, $priority = 10) {
         if (!isset(self::$hooks[$hook_name])) {
-            self::$hooks[$hook_name] = [];
+            self::$hooks[$hook_name] = ["before" => [], "after" => []];
         }
-        self::$hooks[$hook_name][] = ["function" => $function, "priority" => $priority];
-        usort(self::$hooks[$hook_name], function ($a, $b) {
+        self::$hooks[$hook_name]["before"][] = ["function" => $function, "priority" => $priority];
+        usort(self::$hooks[$hook_name]["before"], function($a, $b) {
             return $a["priority"] <=> $b["priority"];
         });
         self::save_hooks();
     }
 
-    public static function do_action($hook_name, ...$args) {
-        if (isset(self::$hooks[$hook_name])) {
-            foreach (self::$hooks[$hook_name] as $hook) {
-                $function = $hook["function"];
-                if (function_exists($function)) {
-                    call_user_func_array($function, $args);
-                }
-            }
+    public static function add_after_hook($hook_name, $function, $priority = 10) {
+        if (!isset(self::$hooks[$hook_name])) {
+            self::$hooks[$hook_name] = ["before" => [], "after" => []];
         }
+        self::$hooks[$hook_name]["after"][] = ["function" => $function, "priority" => $priority];
+        usort(self::$hooks[$hook_name]["after"], function($a, $b) {
+            return $a["priority"] <=> $b["priority"];
+        });
+        self::save_hooks();
     }
 
-    public static function apply_filters($hook_name, $value, ...$args) {
-        if (isset(self::$hooks[$hook_name])) {
-            foreach (self::$hooks[$hook_name] as $hook) {
-                $function = $hook["function"];
-                if (function_exists($function)) {
-                    $value = call_user_func_array($function, array_merge([$value], $args));
+    public static function get_before_hooks($hook_name) {
+        if (isset(self::$hooks[$hook_name]["before"])) {
+            return array_map(function($hook) { return $hook["function"]; }, self::$hooks[$hook_name]["before"]);
+        }
+        return [];
+    }
+
+    public static function get_after_hooks($hook_name) {
+        if (isset(self::$hooks[$hook_name]["after"])) {
+            return array_map(function($hook) { return $hook["function"]; }, self::$hooks[$hook_name]["after"]);
+        }
+        return [];
+    }
+
+    // Função que envolve a chamada de uma função com os hooks automaticamente
+    public static function call_hookable($hook_name, $callable, $args = []) {
+        // Aplica os before hooks
+        $before_hooks = self::get_before_hooks($hook_name);
+        foreach ($before_hooks as $function) {
+            if (function_exists($function)) {
+                // Cada before hook recebe os argumentos e retorna um array com novos argumentos
+                $new_args = call_user_func_array($function, $args);
+                if (is_array($new_args)) {
+                    $args = $new_args;
                 }
             }
         }
-        return $value;
+        // Chama a função original com os parâmetros (possivelmente modificados)
+        $result = call_user_func_array($callable, $args);
+        // Aplica os after hooks
+        $after_hooks = self::get_after_hooks($hook_name);
+        foreach ($after_hooks as $function) {
+            if (function_exists($function)) {
+                $result = call_user_func($function, $result);
+            }
+        }
+        return $result;
     }
 }
 
-// Carregando Hooks
+// Carrega os hooks do JSON
 HookManager::load_hooks();
 
-// --- Função do Sistema ---
+//////////////////////////
+// Função do Sistema
+//////////////////////////
 function sistema_processa_dados($dado) {
-    echo "[SISTEMA] Processando dado original: $dado\n";
-    $dado = HookManager::apply_filters("antes_do_sistema", $dado);
-    $resultado = "Resultado do sistema com dado: $dado\n";
-    $resultado = HookManager::apply_filters("depois_do_sistema", $resultado);
-    return $resultado;
+    echo "[SISTEMA] Processando dado: $dado\n";
+    return "Resultado final: $dado";
 }
 
-// --- Funções do Plugin ---
-function intercepta_antes($dado) {
-    echo "[PLUGIN] Interceptando antes do sistema...\n";
-    return strtoupper($dado);
+//////////////////////////
+// Plugin: Funções de Interceptação
+//////////////////////////
+function antes_plugin($dado) {
+    echo "[PLUGIN] Executando before hook\n";
+    // Exemplo: converte o dado para maiúsculas
+    return [strtoupper($dado)];
 }
 
-function intercepta_depois($resultado) {
-    echo "[PLUGIN] Interceptando depois do sistema...\n";
-    return $resultado . " [MODIFICADO PELO PLUGIN]\n";
+function depois_plugin($resultado) {
+    echo "[PLUGIN] Executando after hook\n";
+    return $resultado . " [MODIFICADO PELO PLUGIN]";
 }
 
-// Registrando Hooks
-HookManager::add_action("antes_do_sistema", "intercepta_antes", 5);
-HookManager::add_action("depois_do_sistema", "intercepta_depois", 10);
+// Registra os hooks
+HookManager::add_before_hook("sistema_processa_dados", "antes_plugin", 5);
+HookManager::add_after_hook("sistema_processa_dados", "depois_plugin", 10);
 
-// Executando o sistema
-$res = sistema_processa_dados("meu dado");
-echo "$res\n";
+//////////////////////////
+// Execução do Sistema via wrapper
+//////////////////////////
+$res = HookManager::call_hookable("sistema_processa_dados", "sistema_processa_dados", ["meu dado"]);
+echo $res . "\n";
 ?>
