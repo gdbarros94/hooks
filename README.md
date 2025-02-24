@@ -18,8 +18,6 @@ O projeto consiste em dois arquivos principais, um para Python e outro para PHP,
 - `hooks.json`: Armazena as configurações de hooks e suas funções associadas.
 - `hook_manager.py`: Implementação do sistema de hooks em Python.
 - `hook_manager.php`: Implementação do sistema de hooks em PHP.
-- `plugin.py` e `plugin.php`: Exemplos de plugins adicionando funcionalidades ao sistema.
-
 ---
 
 ## Como Funciona?
